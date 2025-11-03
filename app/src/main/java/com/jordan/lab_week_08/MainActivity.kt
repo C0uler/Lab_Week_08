@@ -1,6 +1,9 @@
 package com.jordan.lab_week_08
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.NetworkType
@@ -17,7 +21,8 @@ import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.jordan.lab_week_08.Worker.SecondWorker
-import com.jordan.lab_week_08.worker.FirstWorker
+import com.jordan.lab_week_08.Worker.ThirdWorker
+import com.jordan.lab_week_08.Worker.FirstWorker
 
 
 class MainActivity : AppCompatActivity() {
@@ -25,6 +30,8 @@ class MainActivity : AppCompatActivity() {
     //Work manager manages all your requests and workers
     //it also sets up the sequence for all your processes
     private val workManager = WorkManager.getInstance(this)
+
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,6 +83,13 @@ class MainActivity : AppCompatActivity() {
                 .INPUT_DATA_ID, id)
             ).build()
 
+        val thirdRequest = OneTimeWorkRequest
+            .Builder(ThirdWorker::class.java)
+            .setConstraints(networkConstraints)
+            .setInputData(getIdInputData(ThirdWorker
+                .INPUT_DATA_ID, id)
+            ).build()
+
         //Sets up the process sequence from the work manager instance
         //Here it starts with FirstWorker, then SecondWorker
         workManager.beginWith(firstRequest)
@@ -118,6 +132,32 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+
+        val serviceFinishedReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == "ACTION_SERVICE_FINISHED") {
+                    showResult("Foreground service finished.")
+
+                    // --- STEP 4: ENQUEUE THE THIRD WORKER ---
+                    // Now that the service is done, we manually start the third worker.
+                    workManager.enqueue(thirdRequest)
+                }
+            }
+        }
+        val filter = IntentFilter("ACTION_SERVICE_FINISHED")
+        LocalBroadcastManager.getInstance(this).registerReceiver(serviceFinishedReceiver, filter)
+        workManager.getWorkInfoByIdLiveData(thirdRequest.id)
+            .observe(this) { info ->
+                // Add this check
+                if (info != null) {
+                    if (info.state == WorkInfo.State.SUCCEEDED) {
+                        showResult("Third process succeeded")
+                        launchNotificationService()
+                    } else if (info.state == WorkInfo.State.FAILED) {
+                        showResult("Second process failed")
+                    }
+                }
+            }
     }
 
     //Build the data into the correct format before passing it to the worker as input
@@ -152,6 +192,29 @@ class MainActivity : AppCompatActivity() {
         //Start the foreground service through the Service Intent
         ContextCompat.startForegroundService(this, serviceIntent)
     }
+
+    private fun launchSecondNotificationService() {
+        //Observe if the service process is done or not
+        //If it is, show a toast with the channel ID in it
+        SecondNotificationService.trackingCompletion.observe(
+            this) { Id ->
+            showResult("Process for Notification Channel ID $Id is done!")
+        }
+
+        //Create an Intent to start the NotificationService
+        //An ID of "001" is also passed as the notification channel ID
+        val serviceIntent = Intent(
+            this,
+            SecondNotificationService::class.java
+        ).apply {
+            putExtra(EXTRA_ID, "001")
+        }
+
+        //Start the foreground service through the Service Intent
+        ContextCompat.startForegroundService(this, serviceIntent)
+    }
+
+
 
     companion object{
         const val EXTRA_ID = "Id"
